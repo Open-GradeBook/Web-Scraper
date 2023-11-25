@@ -3,6 +3,7 @@ console.log("Hello Courses");
 var express = require('express');
 var router = express.Router();
 const fs = require("fs");
+const { off } = require('process');
 var puppeteer = require('puppeteer');
 
 let data ={};
@@ -110,8 +111,12 @@ function yearsSince1970(){
     return Math.round(Date.now() / year);
 }
 
+function curMonth(){
+    return Date.now().getMonth();
+}
+
 // Overview
-  // This API will
+  // This API will allow for the maintenance and use of a publicly available database of Rose-Hulman's course offerings
 
 // Commands: 
     // Verification (COMPLETE)
@@ -178,34 +183,42 @@ router.put('/update_archive/public',async function(req,res) {
         }
     });
 });
-// Write all courses from public site into 20XX_courseinfo.json. Offsets 'x' years backwards
-router.put('/load_courses/:offset',async function(req,res) {
+// Write all courses from public site into 20XX_courseinfo.json. Year specified is the later of xxxx-yyyy, aka the year the class of yyyy graduates
+router.put('/load_courses/:year',async function(req,res) {
     // prolly gonna be async
     // return an error for stupid offsets. I'll also create new folders for each new year represented, with each one containing the respective courses and sections jsons
-    let curYear = yearsSince1970()+1970;
-    let offsetYear = curYear-offset;
-    if (offsetYear > curYear) {
-        res.send("Invalid year: "+offsetYear);
+    let curYear = yearsSince1970()+1970; // 
+    let months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+    // Can't tell the future
+    if (req.params.year > curYear+1) {
+        res.send("Invalid year: "+req.params.year);
     }
-    
+    // Since summer registrations are over and the public site will be aimed at potential new students, it'll switch over in May to the next school year. Before May it will not have switched and therefore offsets for next year will not yet be valid.
+    if ((req.params.year == curYear+1 && curMonth() < 4)) {
+        res.send("Invalid month. Too early in the year for next years schedule: "+months.get(curMonth())+"\n(Correct if I'm wrong)");
+    }
+
+    // So we assume the site will switch over in May, so anything after that "current" will be next year, and we assume "prev-year" will start existing
+    let year = "";
+    // We know there will be a valid url for the given year
+    if (req.params.year == curYear+1 || (req.params.year == curYear && curMonth() < 4)) { // Means next year and we know it's valid, so we look at the latest ("current"), or we want this year and it hasn't switched yet
+        year = "current";
+    } else { // So we're either looking at this year or years previous once they've been superceded by a current
+        year = (req.params.year-1)+"-"+req.params.year;
+    }
     
 
     // stepping through all 39 pages, will likely involve another puppeteer function to await
     // I should look into some html to json solutions
 
 });
-// Write all sections from banner site into 20XX_sectioninfo.json (depends on corresponding courseinfo.json). Offsets 'x' years backwards
-router.put('/load_sections/:offset',async function(req,res) {
+// Write all sections from banner site into 20XX_sectioninfo.json (depends on corresponding courseinfo.json). // Write all courses from public site into 20XX_courseinfo.json. Year specified is the later of xxxx-yyyy, aka the year the class of yyyy graduates
+router.put('/load_sections/:year',async function(req,res) {
     // prolly gonna be async
     // return an error for stupid offsets. I'll also create new folders for each new year represented, with each one containing the respective courses and sections jsons
-    let curYear = yearsSince1970()+1970;
-    let offsetYear = curYear-offset;
-    if (offsetYear > curYear) {
-        res.send("Invalid year: "+offsetYear);
-    }
 
 
-    
+
     // stepping through all 39 pages, will likely involve another puppeteer function to await
     // I should look into some html to json solutions
 });
