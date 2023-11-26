@@ -3,7 +3,7 @@ console.log("Hello Courses");
 var express = require('express');
 var router = express.Router();
 const fs = require("fs");
-const { off } = require('process');
+const { DateTime } = require("luxon");
 var puppeteer = require('puppeteer');
 
 let data ={};
@@ -52,8 +52,7 @@ fs.readFile(serverSideStorage, (err, buf) => {
     console.log("Data read from file.");
 });
 
-
-async function bannerSiteUp() {
+async function bannerSiteUp(username, password) {
     // puppeteering
     const browser = await puppeteer.launch({headless: "new"});
     const page = await browser.newPage();
@@ -61,12 +60,10 @@ async function bannerSiteUp() {
     await page.goto(bannerSite, { timeout: 30000 } );
 
     // Inputting username/password
-        // await page.type('input[id="usernameUserInput"]', 'gajavegs');
-        // await page.type('input[id="password"]', 'Red/Tornado22');
     await page.click('input[id="usernameUserInput"]');
-    await page.keyboard.type('gajavegs', {delay: 100});
+    await page.keyboard.type(username, {delay: 100});
     await page.click('input[id="password"]');
-    await page.keyboard.type('Red/Tornado22', {delay: 100});
+    await page.keyboard.type(password, {delay: 100});
 
     await page.screenshot({path: 'files/screenshot.png'});
     
@@ -102,17 +99,106 @@ async function publicSiteUp() {
     return content;
 }
 
+
 function yearsSince1970(){
     const minute = 1000 * 60;
     const hour = minute * 60;
     const day = hour * 24;
     const year = day * 365;
-
+    
     return Math.round(Date.now() / year);
 }
 
+
+
+async function getCourses(year) {
+    // puppeteering
+    const browser = await puppeteer.launch({headless: "new"});
+    const page = await browser.newPage();
+    // Public course listing site
+    const response = await page.goto(publicSite(year), { timeout: 30000 } ); // for scraping add options like network2 or whatever; we can vary getting the source html (like in this case) or getting what the user actually sees after some js shenanigans with these options
+    let content = await response.text();
+
+    await page.screenshot({path: 'files/screenshot5.png'});
+    
+    let toRet = [];
+    let loop = true;
+    let length = await page.evaluate(() => {
+        return (Array.from(document.querySelector('#courses').children).length);
+    });
+    while (loop) {
+        // Adds the courses of the current page to the list
+        await getPageCourses(page,toRet);
+        await page.click("[ng-click=\"setCurrent(pagination.current + 1)\"]");
+        loop = await hasNext(page,length);
+    }
+    await getPageCourses(page,toRet);
+
+    return toRet;
+}
+
+// Length changed because no longer at limit of course length
+async function hasNext(page, oldLen) {
+    // return !!(await page.$("[ng-click=\"setCurrent(pagination.current + 1)\"]"));
+    let length = await page.evaluate(() => {
+        return (Array.from(document.querySelector('#courses').children).length);
+    });
+    return oldLen == length;
+}
+
+async function getPageCourses(page, toRet) {
+    const nn = await page.$$("#courses .ng-binding");
+    for (let i = 0; i < nn.length; i++) {
+        const n = nn[i];
+        // https://stackoverflow.com/questions/59001256/pupetteer-get-inner-text-returns-jshandle-prefix
+        const t = await( await n.getProperty('innerText') ).jsonValue(); // evaluate did not work in this scenario, don't 100% get why this does
+        const id_and_name = t.split("\n");
+        const dept_and_number = id_and_name[0].split(" ");
+
+        // console.log("id and name: "+id_and_name);
+        // console.log("dept and number: "+dept_and_number);
+        // await browser.close();
+        toRet.push(course_factory(dept_and_number[1],dept_and_number[0],id_and_name[1])); // id, dept, name
+    }
+}
+
+async function writeCourses(courses, year) {
+    let filepath = "data/"+year+"/";
+    let filename = year+"_courseinfo.json";
+    let data = {};
+    for (let i = 0; i < courses.length; i++) {
+        let cid = courses[i].cid;
+        let cur_dept = courses[i].department;
+        let cname = courses[i].cname;
+
+        let cur = [];
+        if (cur_dept in data) {
+            cur = data[cur_dept];
+        }
+        
+        // update array
+        cur.push({
+                id:cid,
+                name:cname});
+        // update object
+        data[cur_dept] = cur;
+    }
+    let dir_exists = fs.existsSync(filepath);
+    console.log(dir_exists);
+    if (!dir_exists) { // If the directory already exists
+        await fs.promises.mkdir(filepath,{ recursive: true });
+    }
+    fs.writeFile(filepath+filename, JSON.stringify(data), function(err, buf ) {
+        if(err) {
+            console.log("error: ", err);
+        } else {
+            console.log("Data saved successfully!");
+        }
+    });
+}
+
 function curMonth(){
-    return Date.now().getMonth();
+    return DateTime.now().month;
 }
 
 // Overview
@@ -133,8 +219,9 @@ function curMonth(){
             // sectioninfo needs to be organized by quarter, then department, then course id/name, then section/professor
     // Data distribution - the fun stuff (TODO)
         // A bunch of Gets, basically anything an actual DB can do, mixing and matching parameters to yoink appropriate records. Implementing this will be herculean with jsons, so just wait for and leverage mongodb or mysql when it comes around
-        // Get - whether a class exists
-        // Get - whether a section exists 
+        // Get - whether a class exists (to prevent invalid classes from being created)
+        // Get - whether a section exists (to prevent invalid sections from being created) (if their section is empty so far and invisible,
+        //       we'll ask if they can't find a section that anyone's been a part of; don't want to overwhelm with empty sections)
         // Get - any non-empty classes
 
 // ISSUES: 
@@ -147,8 +234,8 @@ function curMonth(){
 
 // Read
 // RUN BEFORE FUTURE SCRAPING. Checks if the banner site is up/in the same format it was designed for
-router.get('/scraping_up/banner', async function(req, res) {
-    let content = await bannerSiteUp(); // gets the banner site html
+router.get('/scraping_up/banner/:username/:password', async function(req, res) {
+    let content = await bannerSiteUp(req.params.username,req.params.password); // gets the banner site html
     let prev = await fs.promises.readFile(archivedBannerSite);
     res.send(content==prev?"banner scraping is up":"banner scraping is down");
 });
@@ -187,13 +274,13 @@ router.put('/update_archive/public',async function(req,res) {
 router.put('/load_courses/:year',async function(req,res) {
     // prolly gonna be async
     // return an error for stupid offsets. I'll also create new folders for each new year represented, with each one containing the respective courses and sections jsons
-    let curYear = yearsSince1970()+1970; // 
+    let curYear = yearsSince1970()+1970;
     let months = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
     // Can't tell the future
     if (req.params.year > curYear+1) {
         res.send("Invalid year: "+req.params.year);
     }
-    // Since summer registrations are over and the public site will be aimed at potential new students, it'll switch over in May to the next school year. Before May it will not have switched and therefore offsets for next year will not yet be valid.
+    // Since summer registrations are over and the public site will be aimed at potential new students, it'll switch over in May to the next school year. Before May it will not have switched and therefore the next year will not yet be valid.
     if ((req.params.year == curYear+1 && curMonth() < 4)) {
         res.send("Invalid month. Too early in the year for next years schedule: "+months.get(curMonth())+"\n(Correct if I'm wrong)");
     }
@@ -206,20 +293,15 @@ router.put('/load_courses/:year',async function(req,res) {
     } else { // So we're either looking at this year or years previous once they've been superceded by a current
         year = (req.params.year-1)+"-"+req.params.year;
     }
-    
-
+    console.log("Year: "+year);
     // stepping through all 39 pages, will likely involve another puppeteer function to await
+    let courses = await getCourses(year);
+    await writeCourses(courses,req.params.year);
     // I should look into some html to json solutions
-
+    res.end();
 });
 // Write all sections from banner site into 20XX_sectioninfo.json (depends on corresponding courseinfo.json). // Write all courses from public site into 20XX_courseinfo.json. Year specified is the later of xxxx-yyyy, aka the year the class of yyyy graduates
 router.put('/load_sections/:year',async function(req,res) {
-    // prolly gonna be async
-    // return an error for stupid offsets. I'll also create new folders for each new year represented, with each one containing the respective courses and sections jsons
 
-
-
-    // stepping through all 39 pages, will likely involve another puppeteer function to await
-    // I should look into some html to json solutions
 });
 module.exports = router;
