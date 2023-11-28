@@ -376,7 +376,7 @@ function thisYear(){
         // Potential solution: We'll have a get where we send in a username, password, and phone number
         // Then we'll have a post where we send in the 2FA code
     // Error: Requesting main frame too early!
-        // Seems to happen arbitrarily, just rereun
+        // Seems to happen arbitrarily, just rerun
 
 // Read
 // RUN BEFORE FUTURE SCRAPING. Checks if the banner site is up/in the same format it was designed for
@@ -390,6 +390,30 @@ router.get('/scraping_up/public', async function(req, res) {
     let content = await publicSiteUp(); // gets the public site html
     let prev = await fs.promises.readFile(archivedPublicSite);
     res.send(content==prev?"public scraping is up":"public scraping is down");
+});
+router.get('/get_classes/:year', async function(req, res) {
+    let filepath = "data/"+req.params.year+"/"+req.params.year+"_courseinfo_courseset.json";
+    let dir_exists = fs.existsSync(filepath);
+    res.send(dir_exists?await fs.promises.readFile(filepath):"This year's courses have not been scraped yet");
+});
+router.get('/get_class_name/:year/:class', async function(req, res) {
+    let filepath = "data/"+req.params.year+"/";
+    let course_set = req.params.year+"_courseinfo_courseset.json";
+    let courses = req.params.year+"_courseinfo.json";
+    let dir_exists = fs.existsSync(filepath);
+    if (dir_exists) {
+        let depts = await JSON.parse(await fs.promises.readFile(filepath+course_set));
+        let dept = depts[req.params.class]; // the corresponding dept
+        let names = await JSON.parse(await fs.promises.readFile(filepath+courses));
+        res.send(names[dept][req.params.class.substring(dept.length)]);
+    } else {
+        res.send("This year's courses have not been scraped yet");
+    }
+});
+router.get('/get_sections/:year/:class', async function(req, res) {
+    // let filepath = req.params.year+"/"+req.params.year+"_courseinfo_courseset.json";
+    // let dir_exists = fs.existsSync(filepath);
+    // res.send(dir_exists?await fs.promises.readFile(filepath):"This year's sections has not been scraped yet");
 });
 
 // Update
@@ -455,4 +479,5 @@ router.put('/load_sections/:year/:username/:password',async function(req,res) {
     
     res.end();
 });
+
 module.exports = router;
