@@ -1,4 +1,4 @@
-# The Course Webscraping Backend
+# The Course Webscraper
 
  **Overview
  ** 
